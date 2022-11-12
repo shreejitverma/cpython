@@ -304,8 +304,7 @@ class Field:
     # with the default value, so the end result is a descriptor that
     # had __set_name__ called on it at the right time.
     def __set_name__(self, owner, name):
-        func = getattr(type(self.default), '__set_name__', None)
-        if func:
+        if func := getattr(type(self.default), '__set_name__', None):
             # There is a __set_name__ method on the descriptor, call
             # it.
             func(self.default, owner, name)
@@ -397,10 +396,11 @@ def _tuple_str(obj_name, fields):
     # return "(self.x,self.y)".
 
     # Special case for the 0-tuple.
-    if not fields:
-        return '()'
-    # Note the trailing comma, needed if this turns out to be a 1-tuple.
-    return f'({",".join([f"{obj_name}.{f.name}" for f in fields])},)'
+    return (
+        f'({",".join([f"{obj_name}.{f.name}" for f in fields])},)'
+        if fields
+        else '()'
+    )
 
 
 # This function's logic is copied from "recursive_repr" function in
@@ -470,49 +470,28 @@ def _field_init(f, frozen, globals, self_name, slots):
 
     default_name = f'_dflt_{f.name}'
     if f.default_factory is not MISSING:
-        if f.init:
-            # This field has a default factory.  If a parameter is
-            # given, use it.  If not, call the factory.
-            globals[default_name] = f.default_factory
-            value = (f'{default_name}() '
-                     f'if {f.name} is _HAS_DEFAULT_FACTORY '
-                     f'else {f.name}')
-        else:
-            # This is a field that's not in the __init__ params, but
-            # has a default factory function.  It needs to be
-            # initialized here by calling the factory function,
-            # because there's no other way to initialize it.
+        value = (
+            f'{default_name}() if {f.name} is _HAS_DEFAULT_FACTORY else {f.name}'
+            if f.init
+            else f'{default_name}()'
+        )
 
-            # For a field initialized with a default=defaultvalue, the
-            # class dict just has the default value
-            # (cls.fieldname=defaultvalue).  But that won't work for a
-            # default factory, the factory must be called in __init__
-            # and we must assign that to self.fieldname.  We can't
-            # fall back to the class dict's value, both because it's
-            # not set, and because it might be different per-class
-            # (which, after all, is why we have a factory function!).
-
-            globals[default_name] = f.default_factory
-            value = f'{default_name}()'
+        # This field has a default factory.  If a parameter is
+        # given, use it.  If not, call the factory.
+        globals[default_name] = f.default_factory
+    elif f.init:
+        if f.default is not MISSING:
+            globals[default_name] = f.default
+        # There's no default, just do an assignment.
+        value = f.name
+    elif slots and f.default is not MISSING:
+        globals[default_name] = f.default
+        value = default_name
     else:
-        # No default factory.
-        if f.init:
-            if f.default is MISSING:
-                # There's no default, just do an assignment.
-                value = f.name
-            elif f.default is not MISSING:
-                globals[default_name] = f.default
-                value = f.name
-        else:
-            # If the class has slots, then initialize this field.
-            if slots and f.default is not MISSING:
-                globals[default_name] = f.default
-                value = default_name
-            else:
-                # This field does not need initialization: reading from it will
-                # just use the class attribute that contains the default.
-                # Signify that to the caller by returning None.
-                return None
+        # This field does not need initialization: reading from it will
+        # just use the class attribute that contains the default.
+        # Signify that to the caller by returning None.
+        return None
 
     # Only test this now, so that we can create variables for the
     # default.  However, return None to signify that we're not going
@@ -537,7 +516,7 @@ def _init_param(f):
         # There's a default, this will be the name that's used to look
         # it up.
         default = f'=_dflt_{f.name}'
-    elif f.default_factory is not MISSING:
+    else:
         # There's a factory function.  Set a marker.
         default = '=_HAS_DEFAULT_FACTORY'
     return f'{f.name}:_type_{f.name}{default}'
@@ -557,25 +536,21 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
     for f in std_fields:
         # Only consider the non-kw-only fields in the __init__ call.
         if f.init:
-            if not (f.default is MISSING and f.default_factory is MISSING):
+            if f.default is not MISSING or f.default_factory is not MISSING:
                 seen_default = True
             elif seen_default:
                 raise TypeError(f'non-default argument {f.name!r} '
                                 'follows default argument')
 
-    locals = {f'_type_{f.name}': f.type for f in fields}
-    locals.update({
+    locals = {f'_type_{f.name}': f.type for f in fields} | {
         'MISSING': MISSING,
         '_HAS_DEFAULT_FACTORY': _HAS_DEFAULT_FACTORY,
         '__dataclass_builtins_object__': object,
-    })
+    }
 
     body_lines = []
     for f in fields:
-        line = _field_init(f, frozen, locals, self_name, slots)
-        # line is None means that this field doesn't require
-        # initialization (it's a pseudo-field).  Just skip it.
-        if line:
+        if line := _field_init(f, frozen, locals, self_name, slots):
             body_lines.append(line)
 
     # Does this class have a post-init function?
@@ -622,21 +597,27 @@ def _frozen_get_del_attr(cls, fields, globals):
     else:
         # Special case for the zero-length tuple.
         fields_str = '()'
-    return (_create_fn('__setattr__',
-                      ('self', 'name', 'value'),
-                      (f'if type(self) is cls or name in {fields_str}:',
-                        ' raise FrozenInstanceError(f"cannot assign to field {name!r}")',
-                       f'super(cls, self).__setattr__(name, value)'),
-                       locals=locals,
-                       globals=globals),
-            _create_fn('__delattr__',
-                      ('self', 'name'),
-                      (f'if type(self) is cls or name in {fields_str}:',
-                        ' raise FrozenInstanceError(f"cannot delete field {name!r}")',
-                       f'super(cls, self).__delattr__(name)'),
-                       locals=locals,
-                       globals=globals),
-            )
+    return _create_fn(
+        '__setattr__',
+        ('self', 'name', 'value'),
+        (
+            f'if type(self) is cls or name in {fields_str}:',
+            ' raise FrozenInstanceError(f"cannot assign to field {name!r}")',
+            'super(cls, self).__setattr__(name, value)',
+        ),
+        locals=locals,
+        globals=globals,
+    ), _create_fn(
+        '__delattr__',
+        ('self', 'name'),
+        (
+            f'if type(self) is cls or name in {fields_str}:',
+            ' raise FrozenInstanceError(f"cannot delete field {name!r}")',
+            'super(cls, self).__delattr__(name)',
+        ),
+        locals=locals,
+        globals=globals,
+    )
 
 
 def _cmp_fn(name, op, self_tuple, other_tuple, globals):
@@ -680,59 +661,17 @@ def _is_kw_only(a_type, dataclasses):
 
 
 def _is_type(annotation, cls, a_module, a_type, is_type_predicate):
-    # Given a type annotation string, does it refer to a_type in
-    # a_module?  For example, when checking that annotation denotes a
-    # ClassVar, then a_module is typing, and a_type is
-    # typing.ClassVar.
-
-    # It's possible to look up a_module given a_type, but it involves
-    # looking in sys.modules (again!), and seems like a waste since
-    # the caller already knows a_module.
-
-    # - annotation is a string type annotation
-    # - cls is the class that this annotation was found in
-    # - a_module is the module we want to match
-    # - a_type is the type in that module we want to match
-    # - is_type_predicate is a function called with (obj, a_module)
-    #   that determines if obj is of the desired type.
-
-    # Since this test does not do a local namespace lookup (and
-    # instead only a module (global) lookup), there are some things it
-    # gets wrong.
-
-    # With string annotations, cv0 will be detected as a ClassVar:
-    #   CV = ClassVar
-    #   @dataclass
-    #   class C0:
-    #     cv0: CV
-
-    # But in this example cv1 will not be detected as a ClassVar:
-    #   @dataclass
-    #   class C1:
-    #     CV = ClassVar
-    #     cv1: CV
-
-    # In C1, the code in this function (_is_type) will look up "CV" in
-    # the module and not find it, so it will not consider cv1 as a
-    # ClassVar.  This is a fairly obscure corner case, and the best
-    # way to fix it would be to eval() the string "CV" with the
-    # correct global and local namespaces.  However that would involve
-    # a eval() penalty for every single field of every dataclass
-    # that's defined.  It was judged not worth it.
-
-    match = _MODULE_IDENTIFIER_RE.match(annotation)
-    if match:
+    if match := _MODULE_IDENTIFIER_RE.match(annotation):
         ns = None
-        module_name = match.group(1)
-        if not module_name:
-            # No module name, assume the class's module did
-            # "from dataclasses import InitVar".
-            ns = sys.modules.get(cls.__module__).__dict__
-        else:
+        if module_name := match.group(1):
             # Look up module_name in the class's module.
             module = sys.modules.get(cls.__module__)
             if module and module.__dict__.get(module_name) is a_module:
                 ns = sys.modules.get(a_type.__module__).__dict__
+        else:
+            # No module name, assume the class's module did
+            # "from dataclasses import InitVar".
+            ns = sys.modules.get(cls.__module__).__dict__
         if ns and is_type_predicate(ns.get(match.group(2)), a_module):
             return True
     return False
@@ -764,22 +703,7 @@ def _get_field(cls, a_name, a_type, default_kw_only):
     # is just a normal field.
     f._field_type = _FIELD
 
-    # In addition to checking for actual types here, also check for
-    # string annotations.  get_type_hints() won't always work for us
-    # (see https://github.com/python/typing/issues/508 for example),
-    # plus it's expensive and would require an eval for every string
-    # annotation.  So, make a best effort to see if this is a ClassVar
-    # or InitVar using regex's and checking that the thing referenced
-    # is actually of the correct type.
-
-    # For the complete discussion, see https://bugs.python.org/issue33453
-
-    # If typing has not been imported, then it's impossible for any
-    # annotation to be a ClassVar.  So, only look for ClassVar if
-    # typing has been imported by any module (not necessarily cls's
-    # module).
-    typing = sys.modules.get('typing')
-    if typing:
+    if typing := sys.modules.get('typing'):
         if (_is_classvar(a_type, typing)
             or (isinstance(f.type, str)
                 and _is_type(f.type, cls, typing, typing.ClassVar,
@@ -803,16 +727,12 @@ def _get_field(cls, a_name, a_type, default_kw_only):
     # know the field name, which allows for better error reporting.
 
     # Special restrictions for ClassVar and InitVar.
-    if f._field_type in (_FIELD_CLASSVAR, _FIELD_INITVAR):
-        if f.default_factory is not MISSING:
-            raise TypeError(f'field {f.name} cannot have a '
-                            'default factory')
-        # Should I check for other field settings? default_factory
-        # seems the most serious to check for.  Maybe add others.  For
-        # example, how about init=False (or really,
-        # init=<not-the-default-init-value>)?  It makes no sense for
-        # ClassVar and InitVar to specify init=<anything>.
-
+    if (
+        f._field_type in (_FIELD_CLASSVAR, _FIELD_INITVAR)
+        and f.default_factory is not MISSING
+    ):
+        raise TypeError(f'field {f.name} cannot have a '
+                        'default factory')
     # kw_only validation and assignment.
     if f._field_type in (_FIELD, _FIELD_INITVAR):
         # For real and InitVar fields, if kw_only wasn't specified use the
@@ -995,7 +915,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Do we have any Field members that don't also have annotations?
     for name, value in cls.__dict__.items():
-        if isinstance(value, Field) and not name in cls_annotations:
+        if isinstance(value, Field) and name not in cls_annotations:
             raise TypeError(f'{name!r} is a field but has no type annotation')
 
     # Check rules that apply if we are derived from any dataclasses.
@@ -1020,8 +940,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # that such a __hash__ == None was not auto-generated, but it
     # close enough.
     class_hash = cls.__dict__.get('__hash__', MISSING)
-    has_explicit_hash = not (class_hash is MISSING or
-                             (class_hash is None and '__eq__' in cls.__dict__))
+    has_explicit_hash = class_hash is not MISSING and (
+        class_hash is not None or '__eq__' not in cls.__dict__
+    )
+
 
     # If we're generating ordering methods, we must be generating the
     # eq methods.
@@ -1097,12 +1019,9 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                 raise TypeError(f'Cannot overwrite attribute {fn.__name__} '
                                 f'in class {cls.__name__}')
 
-    # Decide if/how we're going to create a hash function.
-    hash_action = _hash_action[bool(unsafe_hash),
-                               bool(eq),
-                               bool(frozen),
-                               has_explicit_hash]
-    if hash_action:
+    if hash_action := _hash_action[
+        bool(unsafe_hash), bool(eq), bool(frozen), has_explicit_hash
+    ]:
         # No need to call _set_new_attribute here, since by the time
         # we're here the overwriting is unconditional.
         cls.__hash__ = hash_action(cls, field_list, globals)
@@ -1229,12 +1148,7 @@ def dataclass(cls=None, /, *, init=True, repr=True, eq=True, order=False,
                               weakref_slot)
 
     # See if we're being called as @dataclass or @dataclass().
-    if cls is None:
-        # We're called with parens.
-        return wrap
-
-    # We're called as @dataclass without parens.
-    return wrap(cls)
+    return wrap if cls is None else wrap(cls)
 
 
 def fields(class_or_instance):

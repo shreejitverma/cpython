@@ -96,7 +96,7 @@ def dis(x=None, *, file=None, depth=None, show_caches=False, adaptive=False):
         items = sorted(x.__dict__.items())
         for name, x1 in items:
             if isinstance(x1, _have_code):
-                print("Disassembly of %s:" % name, file=file)
+                print(f"Disassembly of {name}:", file=file)
                 try:
                     dis(x1, file=file, depth=depth, show_caches=show_caches, adaptive=adaptive)
                 except TypeError as msg:
@@ -194,35 +194,32 @@ def code_info(x):
     return _format_code_info(_get_code_object(x))
 
 def _format_code_info(co):
-    lines = []
-    lines.append("Name:              %s" % co.co_name)
-    lines.append("Filename:          %s" % co.co_filename)
-    lines.append("Argument count:    %s" % co.co_argcount)
-    lines.append("Positional-only arguments: %s" % co.co_posonlyargcount)
-    lines.append("Kw-only arguments: %s" % co.co_kwonlyargcount)
-    lines.append("Number of locals:  %s" % co.co_nlocals)
-    lines.append("Stack size:        %s" % co.co_stacksize)
-    lines.append("Flags:             %s" % pretty_flags(co.co_flags))
+    lines = [
+        f"Name:              {co.co_name}",
+        f"Filename:          {co.co_filename}",
+        f"Argument count:    {co.co_argcount}",
+        f"Positional-only arguments: {co.co_posonlyargcount}",
+        f"Kw-only arguments: {co.co_kwonlyargcount}",
+        f"Number of locals:  {co.co_nlocals}",
+        f"Stack size:        {co.co_stacksize}",
+        f"Flags:             {pretty_flags(co.co_flags)}",
+    ]
+
     if co.co_consts:
         lines.append("Constants:")
-        for i_c in enumerate(co.co_consts):
-            lines.append("%4d: %r" % i_c)
+        lines.extend("%4d: %r" % i_c for i_c in enumerate(co.co_consts))
     if co.co_names:
         lines.append("Names:")
-        for i_n in enumerate(co.co_names):
-            lines.append("%4d: %s" % i_n)
+        lines.extend("%4d: %s" % i_n for i_n in enumerate(co.co_names))
     if co.co_varnames:
         lines.append("Variable names:")
-        for i_n in enumerate(co.co_varnames):
-            lines.append("%4d: %s" % i_n)
+        lines.extend("%4d: %s" % i_n for i_n in enumerate(co.co_varnames))
     if co.co_freevars:
         lines.append("Free variables:")
-        for i_n in enumerate(co.co_freevars):
-            lines.append("%4d: %s" % i_n)
+        lines.extend("%4d: %s" % i_n for i_n in enumerate(co.co_freevars))
     if co.co_cellvars:
         lines.append("Cell variables:")
-        for i_n in enumerate(co.co_cellvars):
-            lines.append("%4d: %s" % i_n)
+        lines.extend("%4d: %s" % i_n for i_n in enumerate(co.co_cellvars))
     return "\n".join(lines)
 
 def show_code(co, *, file=None):
@@ -316,16 +313,19 @@ class Instruction(_Instruction):
             fields.append('>>')
         else:
             fields.append('  ')
-        # Column: Instruction offset from start of code sequence
-        fields.append(repr(self.offset).rjust(offset_width))
-        # Column: Opcode name
-        fields.append(self.opname.ljust(_OPNAME_WIDTH))
+        fields.extend(
+            (
+                repr(self.offset).rjust(offset_width),
+                self.opname.ljust(_OPNAME_WIDTH),
+            )
+        )
+
         # Column: Opcode argument
         if self.arg is not None:
             fields.append(repr(self.arg).rjust(_OPARG_WIDTH))
             # Column: Opcode argument details
             if self.argrepr:
-                fields.append('(' + self.argrepr + ')')
+                fields.append(f'({self.argrepr})')
         return ' '.join(fields).rstrip()
 
 
@@ -342,10 +342,7 @@ def get_instructions(x, *, first_line=None, show_caches=False, adaptive=False):
     """
     co = _get_code_object(x)
     linestarts = dict(findlinestarts(co))
-    if first_line is not None:
-        line_offset = first_line - co.co_firstlineno
-    else:
-        line_offset = 0
+    line_offset = first_line - co.co_firstlineno if first_line is not None else 0
     return _get_instructions_bytes(_get_code_array(co, adaptive),
                                    co._varname_from_oparg,
                                    co.co_names, co.co_consts,
@@ -363,9 +360,8 @@ def _get_const_value(op, arg, co_consts):
     assert op in hasconst
 
     argval = UNKNOWN
-    if op == LOAD_CONST:
-        if co_consts is not None:
-            argval = co_consts[arg]
+    if op == LOAD_CONST and co_consts is not None:
+        argval = co_consts[arg]
     return argval
 
 def _get_const_info(op, arg, co_consts):
@@ -439,7 +435,7 @@ def _get_instructions_bytes(code, varname_from_oparg=None,
     get_name = None if names is None else names.__getitem__
     labels = set(findlabels(code))
     for start, end, target, _, _ in exception_entries:
-        for i in range(start, end):
+        for _ in range(start, end):
             labels.add(target)
     starts_line = None
     for offset, op, arg in _unpack_opargs(code):
@@ -464,22 +460,22 @@ def _get_instructions_bytes(code, varname_from_oparg=None,
                 if deop == LOAD_GLOBAL:
                     argval, argrepr = _get_name_info(arg//2, get_name)
                     if (arg & 1) and argrepr:
-                        argrepr = "NULL + " + argrepr
+                        argrepr = f"NULL + {argrepr}"
                 elif deop == LOAD_ATTR:
                     argval, argrepr = _get_name_info(arg//2, get_name)
                     if (arg & 1) and argrepr:
-                        argrepr = "NULL|self + " + argrepr
+                        argrepr = f"NULL|self + {argrepr}"
                 else:
                     argval, argrepr = _get_name_info(arg, get_name)
             elif deop in hasjabs:
                 argval = arg*2
-                argrepr = "to " + repr(argval)
+                argrepr = f"to {repr(argval)}"
             elif deop in hasjrel:
                 signed_arg = -arg if _is_backward_jump(deop) else arg
                 argval = offset + 2 + signed_arg*2
                 if deop == FOR_ITER:
                     argval += 2
-                argrepr = "to " + repr(argval)
+                argrepr = f"to {repr(argval)}"
             elif deop in haslocal or deop in hasfree:
                 argval, argrepr = _get_name_info(arg, varname_from_oparg)
             elif deop in hascompare:
@@ -554,17 +550,11 @@ def _disassemble_bytes(code, lasti=-1, varname_from_oparg=None,
     show_lineno = bool(linestarts)
     if show_lineno:
         maxlineno = max(linestarts.values()) + line_offset
-        if maxlineno >= 1000:
-            lineno_width = len(str(maxlineno))
-        else:
-            lineno_width = 3
+        lineno_width = len(str(maxlineno)) if maxlineno >= 1000 else 3
     else:
         lineno_width = 0
     maxoffset = len(code) - 2
-    if maxoffset >= 10000:
-        offset_width = len(str(maxoffset))
-    else:
-        offset_width = 4
+    offset_width = len(str(maxoffset)) if maxoffset >= 10000 else 4
     for instr in _get_instructions_bytes(code, varname_from_oparg, names,
                                          co_consts, linestarts,
                                          line_offset=line_offset,
@@ -751,10 +741,7 @@ class Bytecode:
     def dis(self):
         """Return a formatted view of the bytecode operations."""
         co = self.codeobj
-        if self.current_offset is not None:
-            offset = self.current_offset
-        else:
-            offset = -1
+        offset = self.current_offset if self.current_offset is not None else -1
         with io.StringIO() as output:
             _disassemble_bytes(_get_code_array(co, self.adaptive),
                                varname_from_oparg=co._varname_from_oparg,
