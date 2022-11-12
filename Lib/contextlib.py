@@ -707,11 +707,7 @@ class AsyncExitStack(_BaseExitStack, AbstractAsyncContextManager):
         while self._exit_callbacks:
             is_sync, cb = self._exit_callbacks.pop()
             try:
-                if is_sync:
-                    cb_suppress = cb(*exc_details)
-                else:
-                    cb_suppress = await cb(*exc_details)
-
+                cb_suppress = cb(*exc_details) if is_sync else await cb(*exc_details)
                 if cb_suppress:
                     suppressed_exc = True
                     pending_raise = False

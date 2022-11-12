@@ -49,22 +49,13 @@ Content-Type: text/html
 
 __UNDEF__ = []                          # a special sentinel object
 def small(text):
-    if text:
-        return '<small>' + text + '</small>'
-    else:
-        return ''
+    return f'<small>{text}</small>' if text else ''
 
 def strong(text):
-    if text:
-        return '<strong>' + text + '</strong>'
-    else:
-        return ''
+    return f'<strong>{text}</strong>' if text else ''
 
 def grey(text):
-    if text:
-        return '<font color="#909090">' + text + '</font>'
-    else:
-        return ''
+    return '<font color="#909090">' + text + '</font>' if text else ''
 
 def lookup(name, frame, locals):
     """Find the value for a given name in the given environment."""
@@ -77,9 +68,8 @@ def lookup(name, frame, locals):
         if isinstance(builtins, dict):
             if name in builtins:
                 return 'builtin', builtins[name]
-        else:
-            if hasattr(builtins, name):
-                return 'builtin', getattr(builtins, name)
+        elif hasattr(builtins, name):
+            return 'builtin', getattr(builtins, name)
     return None, __UNDEF__
 
 def scanvars(reader, frame, locals):
@@ -96,7 +86,7 @@ def scanvars(reader, frame, locals):
                 where, value = lookup(token, frame, locals)
                 vars.append((token, where, value))
         elif token == '.':
-            prefix += lasttoken + '.'
+            prefix += f'{lasttoken}.'
             parent = value
         else:
             parent, prefix = None, ''
@@ -108,7 +98,7 @@ def html(einfo, context=5):
     etype, evalue, etb = einfo
     if isinstance(etype, type):
         etype = etype.__name__
-    pyver = 'Python ' + sys.version.split()[0] + ': ' + sys.executable
+    pyver = f'Python {sys.version.split()[0]}: {sys.executable}'
     date = time.ctime(time.time())
     head = f'''
 <body bgcolor="#f0f0f8">
@@ -135,16 +125,23 @@ function calls leading up to the error, in the order they occurred.</p>'''
         args, varargs, varkw, locals = inspect.getargvalues(frame)
         call = ''
         if func != '?':
-            call = 'in ' + strong(pydoc.html.escape(func))
+            call = f'in {strong(pydoc.html.escape(func))}'
             if func != "<module>":
-                call += inspect.formatargvalues(args, varargs, varkw, locals,
-                    formatvalue=lambda value: '=' + pydoc.html.repr(value))
+                call += inspect.formatargvalues(
+                    args,
+                    varargs,
+                    varkw,
+                    locals,
+                    formatvalue=lambda value: f'={pydoc.html.repr(value)}',
+                )
+
 
         highlight = {}
         def reader(lnum=[lnum]):
             highlight[lnum[0]] = 1
             try: return linecache.getline(file, lnum[0])
             finally: lnum[0] += 1
+
         vars = scanvars(reader, frame, locals)
 
         rows = ['<tr><td bgcolor="#d8bbff">%s%s %s</td></tr>' %
@@ -154,11 +151,11 @@ function calls leading up to the error, in the order they occurred.</p>'''
             for line in lines:
                 num = small('&nbsp;' * (5-len(str(i))) + str(i)) + '&nbsp;'
                 if i in highlight:
-                    line = '<tt>=&gt;%s%s</tt>' % (num, pydoc.html.preformat(line))
+                    line = f'<tt>=&gt;{num}{pydoc.html.preformat(line)}</tt>'
                     rows.append('<tr><td bgcolor="#ffccee">%s</td></tr>' % line)
                 else:
-                    line = '<tt>&nbsp;&nbsp;%s%s</tt>' % (num, pydoc.html.preformat(line))
-                    rows.append('<tr><td>%s</td></tr>' % grey(line))
+                    line = f'<tt>&nbsp;&nbsp;{num}{pydoc.html.preformat(line)}</tt>'
+                    rows.append(f'<tr><td>{grey(line)}</td></tr>')
                 i += 1
 
         done, dump = {}, []
@@ -167,22 +164,24 @@ function calls leading up to the error, in the order they occurred.</p>'''
             done[name] = 1
             if value is not __UNDEF__:
                 if where in ('global', 'builtin'):
-                    name = ('<em>%s</em> ' % where) + strong(name)
+                    name = f'<em>{where}</em> {strong(name)}'
                 elif where == 'local':
                     name = strong(name)
                 else:
                     name = where + strong(name.split('.')[-1])
-                dump.append('%s&nbsp;= %s' % (name, pydoc.html.repr(value)))
+                dump.append(f'{name}&nbsp;= {pydoc.html.repr(value)}')
             else:
-                dump.append(name + ' <em>undefined</em>')
+                dump.append(f'{name} <em>undefined</em>')
 
-        rows.append('<tr><td>%s</td></tr>' % small(grey(', '.join(dump))))
+        rows.append(f"<tr><td>{small(grey(', '.join(dump)))}</td></tr>")
         frames.append('''
 <table width="100%%" cellspacing=0 cellpadding=0 border=0>
 %s</table>''' % '\n'.join(rows))
 
-    exception = ['<p>%s: %s' % (strong(pydoc.html.escape(str(etype))),
-                                pydoc.html.escape(str(evalue)))]
+    exception = [
+        f'<p>{strong(pydoc.html.escape(str(etype)))}: {pydoc.html.escape(str(evalue))}'
+    ]
+
     for name in dir(evalue):
         if name[:1] == '_': continue
         value = pydoc.html.repr(getattr(evalue, name))
@@ -205,7 +204,7 @@ def text(einfo, context=5):
     etype, evalue, etb = einfo
     if isinstance(etype, type):
         etype = etype.__name__
-    pyver = 'Python ' + sys.version.split()[0] + ': ' + sys.executable
+    pyver = f'Python {sys.version.split()[0]}: {sys.executable}'
     date = time.ctime(time.time())
     head = "%s\n%s\n%s\n" % (str(etype), pyver, date) + '''
 A problem occurred in a Python script.  Here is the sequence of
@@ -219,19 +218,26 @@ function calls leading up to the error, in the order they occurred.
         args, varargs, varkw, locals = inspect.getargvalues(frame)
         call = ''
         if func != '?':
-            call = 'in ' + func
+            call = f'in {func}'
             if func != "<module>":
-                call += inspect.formatargvalues(args, varargs, varkw, locals,
-                    formatvalue=lambda value: '=' + pydoc.text.repr(value))
+                call += inspect.formatargvalues(
+                    args,
+                    varargs,
+                    varkw,
+                    locals,
+                    formatvalue=lambda value: f'={pydoc.text.repr(value)}',
+                )
+
 
         highlight = {}
         def reader(lnum=[lnum]):
             highlight[lnum[0]] = 1
             try: return linecache.getline(file, lnum[0])
             finally: lnum[0] += 1
+
         vars = scanvars(reader, frame, locals)
 
-        rows = [' %s %s' % (file, call)]
+        rows = [f' {file} {call}']
         if index is not None:
             i = lnum - index
             for line in lines:
@@ -244,16 +250,17 @@ function calls leading up to the error, in the order they occurred.
             if name in done: continue
             done[name] = 1
             if value is not __UNDEF__:
-                if where == 'global': name = 'global ' + name
+                if where == 'global':
+                    name = f'global {name}'
                 elif where != 'local': name = where + name.split('.')[-1]
-                dump.append('%s = %s' % (name, pydoc.text.repr(value)))
+                dump.append(f'{name} = {pydoc.text.repr(value)}')
             else:
-                dump.append(name + ' undefined')
+                dump.append(f'{name} undefined')
 
         rows.append('\n'.join(dump))
         frames.append('\n%s\n' % '\n'.join(rows))
 
-    exception = ['%s: %s' % (str(etype), str(evalue))]
+    exception = [f'{str(etype)}: {str(evalue)}']
     for name in dir(evalue):
         value = pydoc.text.repr(getattr(evalue, name))
         exception.append('\n%s%s = %s' % (" "*4, name, value))
@@ -296,7 +303,7 @@ class Hook:
         if self.display:
             if plain:
                 doc = pydoc.html.escape(doc)
-                self.file.write('<pre>' + doc + '</pre>\n')
+                self.file.write(f'<pre>{doc}' + '</pre>\n')
             else:
                 self.file.write(doc + '\n')
         else:
@@ -309,9 +316,9 @@ class Hook:
             try:
                 with os.fdopen(fd, 'w') as file:
                     file.write(doc)
-                msg = '%s contains the description of this error.' % path
+                msg = f'{path} contains the description of this error.'
             except:
-                msg = 'Tried to save traceback to %s, but failed.' % path
+                msg = f'Tried to save traceback to {path}, but failed.'
 
             if self.format == 'html':
                 self.file.write('<p>%s</p>\n' % msg)

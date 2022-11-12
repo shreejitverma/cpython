@@ -62,11 +62,10 @@ def aix_platform():
 
 # extract vrtl from the BUILD_GNU_TYPE as an int
 def _aix_bgt():
-    # type: () -> List[int]
-    gnu_type = sysconfig.get_config_var("BUILD_GNU_TYPE")
-    if not gnu_type:
+    if gnu_type := sysconfig.get_config_var("BUILD_GNU_TYPE"):
+        return _aix_vrtl(vrmf=gnu_type)
+    else:
         raise ValueError("BUILD_GNU_TYPE is not defined")
-    return _aix_vrtl(vrmf=gnu_type)
 
 
 def aix_buildtag():

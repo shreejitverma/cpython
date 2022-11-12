@@ -30,7 +30,7 @@ class _Method(_namedtuple('_Method', 'name ident salt_chars total_size')):
     legacy 2-character crypt method."""
 
     def __repr__(self):
-        return '<crypt.METHOD_{}>'.format(self.name)
+        return f'<crypt.METHOD_{self.name}>'
 
 
 def mksalt(method=None, *, rounds=None):
@@ -44,11 +44,7 @@ def mksalt(method=None, *, rounds=None):
     if rounds is not None and not isinstance(rounds, int):
         raise TypeError(f'{rounds.__class__.__name__} object cannot be '
                         f'interpreted as an integer')
-    if not method.ident:  # traditional
-        s = ''
-    else:  # modular
-        s = f'${method.ident}$'
-
+    s = f'${method.ident}$' if method.ident else ''
     if method.ident and method.ident[0] == '2':  # Blowfish variants
         if rounds is None:
             log_rounds = 12
@@ -67,7 +63,7 @@ def mksalt(method=None, *, rounds=None):
     elif rounds is not None:
         raise ValueError(f"{method} doesn't support the rounds argument")
 
-    s += ''.join(_sr.choice(_saltchars) for char in range(method.salt_chars))
+    s += ''.join(_sr.choice(_saltchars) for _ in range(method.salt_chars))
     return s
 
 
@@ -91,7 +87,7 @@ methods = []
 
 def _add_method(name, *args, rounds=None):
     method = _Method(name, *args)
-    globals()['METHOD_' + name] = method
+    globals()[f'METHOD_{name}'] = method
     salt = mksalt(method, rounds=rounds)
     result = None
     try:
@@ -115,7 +111,7 @@ _add_method('SHA256', '5', 16, 63)
 # 'y' is the same as 'b', for compatibility
 # with openwall crypt_blowfish.
 for _v in 'b', 'y', 'a', '':
-    if _add_method('BLOWFISH', '2' + _v, 22, 59 + len(_v), rounds=1<<4):
+    if _add_method('BLOWFISH', f'2{_v}', 22, 59 + len(_v), rounds=1 << 4):
         break
 
 _add_method('MD5', '1', 8, 34)

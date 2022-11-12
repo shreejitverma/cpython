@@ -150,8 +150,8 @@ def str_to_int(s):
     m = re.match(r'\s*([+-]?)([0-9_]+)\s*', s)
     if not m:
         raise ValueError('invalid literal for int() with base 10')
-    v = int_from_string(m.group(2))
-    if m.group(1) == '-':
+    v = int_from_string(m[2])
+    if m[1] == '-':
         v = -v
     return v
 
